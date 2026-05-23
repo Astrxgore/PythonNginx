@@ -30,7 +30,9 @@ class ServerConfig:
 class AppConfig:
     servers: list[ServerConfig]
     header_limit: int = 16 * 1024
+    body_limit: int = 2 * 1024 * 1024
     keepalive_timeout: float = 30.0
     keepalive_max_requests: int = 100
     open_file_cache_max: int = 128
     open_file_cache_inactive: float = 30.0
+    proxy_timeout: float = 10.0

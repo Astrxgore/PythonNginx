@@ -10,7 +10,7 @@ from pynginx.server.app import ServerApp
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the educational PythonNginx server.")
+    parser = argparse.ArgumentParser(description="Run the PythonNginx server.")
     parser.add_argument("--config", default="config/pynginx.conf", help="Path to config file.")
     return parser.parse_args()
 

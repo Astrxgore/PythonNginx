@@ -17,6 +17,16 @@ class HeaderTooLargeError(HTTPParseError):
     reason = "Request Header Fields Too Large"
 
 
+class BodyTooLargeError(HTTPParseError):
+    status_code = 413
+    reason = "Payload Too Large"
+
+
+class UnsupportedRequestError(HTTPParseError):
+    status_code = 501
+    reason = "Not Implemented"
+
+
 async def read_request(reader: asyncio.StreamReader, header_limit: int) -> HTTPRequest | None:
     """Read and parse one request head.
 
@@ -60,4 +70,34 @@ async def read_request(reader: asyncio.StreamReader, header_limit: int) -> HTTPR
     if version == "HTTP/1.1" and "host" not in headers:
         raise HTTPParseError("HTTP/1.1 request without Host")
 
-    return HTTPRequest(method=method, target=target, version=version, headers=headers, raw_head=head)
+    if headers.get("transfer-encoding", "").lower() not in {"", "identity"}:
+        raise UnsupportedRequestError("chunked request body is not supported")
+
+    content_length = 0
+    if "content-length" in headers:
+        try:
+            content_length = int(headers["content-length"])
+        except ValueError as exc:
+            raise HTTPParseError("invalid Content-Length") from exc
+        if content_length < 0:
+            raise HTTPParseError("negative Content-Length")
+
+    return HTTPRequest(
+        method=method,
+        target=target,
+        version=version,
+        headers=headers,
+        raw_head=head,
+        content_length=content_length,
+    )
+
+
+async def read_body(reader: asyncio.StreamReader, request: HTTPRequest, body_limit: int) -> bytes:
+    if request.content_length == 0:
+        return b""
+    if request.content_length > body_limit:
+        raise BodyTooLargeError()
+    try:
+        return await reader.readexactly(request.content_length)
+    except asyncio.IncompleteReadError as exc:
+        raise HTTPParseError("connection closed during request body") from exc

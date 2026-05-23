@@ -22,6 +22,14 @@ def _parse_listen(value: str) -> tuple[str, int]:
     return host, int(port)
 
 
+def _as_int(value: str | None, default: int) -> int:
+    return int(value) if value is not None else default
+
+
+def _as_float(value: str | None, default: float) -> float:
+    return float(value) if value is not None else default
+
+
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)
     parser = configparser.ConfigParser()
@@ -68,4 +76,14 @@ def load_config(path: str | Path) -> AppConfig:
     if not servers:
         raise ValueError("config must contain at least one [server:name] section")
 
-    return AppConfig(servers=list(servers.values()))
+    main = parser["main"] if parser.has_section("main") else {}
+    return AppConfig(
+        servers=list(servers.values()),
+        header_limit=_as_int(main.get("header_limit"), 16 * 1024),
+        body_limit=_as_int(main.get("body_limit"), 2 * 1024 * 1024),
+        keepalive_timeout=_as_float(main.get("keepalive_timeout"), 30.0),
+        keepalive_max_requests=_as_int(main.get("keepalive_max_requests"), 100),
+        open_file_cache_max=_as_int(main.get("open_file_cache_max"), 128),
+        open_file_cache_inactive=_as_float(main.get("open_file_cache_inactive"), 30.0),
+        proxy_timeout=_as_float(main.get("proxy_timeout"), 10.0),
+    )
