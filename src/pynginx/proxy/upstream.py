@@ -27,9 +27,41 @@ async def proxy_request(
     client_ip: str = "",
     timeout: float = 10.0,
 ) -> HTTPResponse:
+    upstreams = _ordered_upstreams(_parse_upstream_urls(upstream_url))
+    for url in upstreams:
+        response = await _try_upstream(request, url, client_ip, timeout)
+        if response is not None:
+            return response
+
+    return text_response(502, "Bad Gateway")
+
+
+_UPSTREAM_POSITIONS: dict[tuple[str, ...], int] = {}
+
+
+def _parse_upstream_urls(upstream_url: str) -> list[str]:
+    return [url for url in upstream_url.split() if url]
+
+
+def _ordered_upstreams(upstreams: list[str]) -> list[str]:
+    if len(upstreams) < 2:
+        return upstreams
+
+    key = tuple(upstreams)
+    start = _UPSTREAM_POSITIONS.get(key, 0) % len(upstreams)
+    _UPSTREAM_POSITIONS[key] = (start + 1) % len(upstreams)
+    return upstreams[start:] + upstreams[:start]
+
+
+async def _try_upstream(
+    request: HTTPRequest,
+    upstream_url: str,
+    client_ip: str,
+    timeout: float,
+) -> HTTPResponse | None:
     parsed = urlparse(upstream_url)
     if parsed.scheme != "http" or not parsed.hostname:
-        return text_response(502, "Bad Gateway")
+        return None
 
     port = parsed.port or 80
     try:
@@ -44,8 +76,14 @@ async def proxy_request(
                 await writer.wait_closed()
             except OSError:
                 pass
-    except (OSError, asyncio.TimeoutError, ValueError):
-        return text_response(502, "Bad Gateway")
+    except (
+        OSError,
+        asyncio.TimeoutError,
+        ValueError,
+        asyncio.IncompleteReadError,
+        asyncio.LimitOverrunError,
+    ):
+        return None
 
 
 def _build_upstream_request(request: HTTPRequest, host_header: str, client_ip: str) -> bytes:
@@ -91,7 +129,7 @@ async def _read_upstream_response(reader: asyncio.StreamReader) -> HTTPResponse:
         headers[name.strip()] = value.strip()
 
     if any(line.lower().startswith(b"transfer-encoding:") for line in lines[1:]):
-        return text_response(502, "Bad Gateway")
+        raise ValueError("chunked upstream response is not supported")
 
     content_length = 0
     for raw_line in lines[1:]:

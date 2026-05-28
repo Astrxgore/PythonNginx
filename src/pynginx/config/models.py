@@ -23,6 +23,9 @@ class ServerConfig:
     root: Path
     autoindex: bool = False
     access_log: Path | None = None
+    ssl_enabled: bool = False
+    ssl_certfile: Path | None = None
+    ssl_keyfile: Path | None = None
     locations: list[LocationConfig] = field(default_factory=list)
 
 

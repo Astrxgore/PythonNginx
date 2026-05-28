@@ -34,6 +34,9 @@
 `asyncio.open_connection`
 : Открывает TCP-соединение как клиент.
 
+`ssl.SSLContext`
+: Настраивает TLS для HTTPS-сервера. В проекте используется `ssl.PROTOCOL_TLS_SERVER` и `load_cert_chain()`.
+
 `asyncio.wait_for`
 : Ограничивает время ожидания операции.
 
@@ -152,6 +155,9 @@ Reverse proxy
 
 Upstream
 : Сервер, к которому proxy пересылает запрос.
+
+Load balancing
+: Распределение запросов между несколькими upstream. В проекте используется простой round-robin.
 
 Hop-by-hop headers
 : Headers, действующие только на одно соединение. Proxy удаляет их при пересылке.

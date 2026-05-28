@@ -12,6 +12,8 @@
 - virtual servers по заголовку `Host`;
 - конфигурация через файл;
 - `proxy_pass` на HTTP upstream.
+- распределение нагрузки между несколькими upstream с failover;
+- HTTPS через стандартный модуль `ssl`.
 
 ## Как запустить
 
@@ -101,14 +103,23 @@ root = public
 autoindex = on
 
 [location:local:/api/]
-proxy_pass = http://127.0.0.1:9000
+proxy_pass = http://127.0.0.1:9000 http://127.0.0.1:9001
+
+[server:secure]
+listen = 0.0.0.0:8443
+server_name = secure.local
+root = public
+autoindex = on
+ssl = on
+ssl_certfile = certs/server.crt
+ssl_keyfile = certs/server.key
 ```
 
 `[main]` задает общие лимиты.
 
-`[server:name]` описывает virtual server: где слушать, какие имена хоста принимать, где лежит статика.
+`[server:name]` описывает virtual server: где слушать, какие имена хоста принимать, где лежит статика. Если указать `ssl = on`, сервер слушает HTTPS и загружает сертификат из `ssl_certfile` и ключ из `ssl_keyfile`.
 
-`[location:server_name:/prefix/]` задает правило для URL-префикса. Если есть `proxy_pass`, запрос проксируется. Если нет, отдается статика.
+`[location:server_name:/prefix/]` задает правило для URL-префикса. Если есть `proxy_pass`, запрос проксируется. Если в `proxy_pass` перечислено несколько URL через пробел, они используются как upstream-пул. Если нет `proxy_pass`, отдается статика.
 
 ## HTTP parser
 
@@ -231,18 +242,47 @@ Location выбирается по самому длинному подходя�
 
 `proxy/upstream.py` реализует простой reverse proxy:
 
-1. Разбирает `proxy_pass` через `urlparse`.
-2. Открывает соединение к upstream через `asyncio.open_connection`.
-3. Собирает новый HTTP/1.1-запрос.
-4. Передает path, query, headers и body.
-5. Переписывает `Host` на upstream.
-6. Добавляет `X-Forwarded-For`.
-7. Убирает hop-by-hop headers.
-8. Читает ответ upstream и возвращает клиенту.
+1. Делит `proxy_pass` на один или несколько upstream URL.
+2. Выбирает стартовый upstream по round-robin.
+3. Разбирает URL через `urlparse`.
+4. Открывает соединение к upstream через `asyncio.open_connection`.
+5. Собирает новый HTTP/1.1-запрос.
+6. Передает path, query, headers и body.
+7. Переписывает `Host` на upstream.
+8. Добавляет `X-Forwarded-For`.
+9. Убирает hop-by-hop headers.
+10. Читает ответ upstream и возвращает клиенту.
+
+Если выбранный upstream не отвечает, соединение не открылось, истек timeout или ответ нельзя разобрать, proxy пробует следующий URL из того же `proxy_pass`. Если все upstream недоступны, клиент получает `502 Bad Gateway`.
+
+Пример:
+
+```ini
+[location:local:/api/]
+proxy_pass = http://127.0.0.1:9000 http://127.0.0.1:9001
+```
 
 Для простоты upstream-запрос отправляется с `Connection: close`. Это избавляет от необходимости держать отдельный пул keep-alive соединений к upstream.
 
-Ограничение: chunked upstream response не разбирается, сервер вернет `502 Bad Gateway`. Для учебной задачи это нормально, потому что базовый `python -m http.server` и большинство простых тестов используют `Content-Length`.
+Ограничение: chunked upstream response не разбирается, сервер попробует следующий upstream или вернет `502 Bad Gateway`, если других вариантов нет. Для учебной задачи это нормально, потому что базовый `python -m http.server` и большинство простых тестов используют `Content-Length`.
+
+## SSL/HTTPS
+
+HTTPS включается на уровне `server`:
+
+```ini
+[server:secure]
+listen = 0.0.0.0:8443
+server_name = secure.local
+root = public
+ssl = on
+ssl_certfile = certs/server.crt
+ssl_keyfile = certs/server.key
+```
+
+В `server/app.py` создается `ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)`, загружается цепочка сертификата через `load_cert_chain()`, и этот context передается в `asyncio.start_server(..., ssl=context)`.
+
+На одном `listen`-адресе все virtual servers должны быть либо обычными HTTP, либо HTTPS. SNI и разные сертификаты на одном порту не реализованы, чтобы код оставался простым.
 
 ## Access log
 
@@ -278,10 +318,11 @@ Location выбирается по самому длинному подходя�
 - Open file cache.
 - Access log.
 - Proxy pass на HTTP upstream.
+- Round-robin и failover для нескольких upstream.
+- HTTPS/TLS для server.
 
 ## Что сознательно не реализовано
 
-- TLS/HTTPS.
 - HTTP/2 и HTTP/3.
 - gzip/brotli.
 - Chunked request body.
@@ -317,8 +358,25 @@ curl -i http://127.0.0.1:8080/files/
 Proxy:
 
 ```bash
-python3 -m http.server 9000
+mkdir -p upstream1/api upstream2/api
+echo "from 9000" > upstream1/api/index.html
+echo "from 9001" > upstream2/api/index.html
+python3 -m http.server 9000 -d upstream1 &
+python3 -m http.server 9001 -d upstream2 &
 curl -i http://127.0.0.1:8080/api/
+```
+
+HTTPS:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/server.key \
+  -out certs/server.crt \
+  -days 365 \
+  -subj "/CN=localhost"
+PYTHONPATH=src python3 -m pynginx --config config/ssl_demo.conf
+curl -k -i https://127.0.0.1:8443/
 ```
 
 Access log:

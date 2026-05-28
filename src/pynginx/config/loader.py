@@ -53,6 +53,9 @@ def load_config(path: str | Path) -> AppConfig:
                 root=Path(data.get("root", "public")),
                 autoindex=_as_bool(data.get("autoindex")),
                 access_log=Path(data["access_log"]) if data.get("access_log") else None,
+                ssl_enabled=_as_bool(data.get("ssl")),
+                ssl_certfile=Path(data["ssl_certfile"]) if data.get("ssl_certfile") else None,
+                ssl_keyfile=Path(data["ssl_keyfile"]) if data.get("ssl_keyfile") else None,
             )
         elif section.startswith("location:"):
             _, server_name, prefix = section.split(":", 2)

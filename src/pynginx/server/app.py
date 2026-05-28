@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 from collections import defaultdict
 
 from pynginx.config.models import AppConfig, ServerConfig
@@ -25,7 +26,8 @@ class ServerApp:
             by_listen[(server.listen_host, server.listen_port)].append(server)
 
         servers = []
-        for (host, port), _virtual_servers in by_listen.items():
+        for (host, port), virtual_servers in by_listen.items():
+            ssl_context = _build_ssl_context(virtual_servers)
             server = await asyncio.start_server(
                 lambda reader, writer: handle_connection(
                     reader,
@@ -36,9 +38,11 @@ class ServerApp:
                 ),
                 host,
                 port,
+                ssl=ssl_context,
             )
             servers.append(server)
-            print(f"listening on http://{host}:{port}")
+            scheme = "https" if ssl_context else "http"
+            print(f"listening on {scheme}://{host}:{port}")
 
         try:
             async with asyncio.TaskGroup() as group:
@@ -46,3 +50,19 @@ class ServerApp:
                     group.create_task(server.serve_forever())
         finally:
             self.open_file_cache.close_all()
+
+
+def _build_ssl_context(virtual_servers: list[ServerConfig]) -> ssl.SSLContext | None:
+    ssl_servers = [server for server in virtual_servers if server.ssl_enabled]
+    if not ssl_servers:
+        return None
+    if len(ssl_servers) != len(virtual_servers):
+        raise ValueError("all virtual servers on the same listen address must use the same ssl mode")
+
+    server = ssl_servers[0]
+    if not server.ssl_certfile or not server.ssl_keyfile:
+        raise ValueError(f"server {server.name!r} has ssl enabled but no ssl_certfile/ssl_keyfile")
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(server.ssl_certfile, server.ssl_keyfile)
+    return context

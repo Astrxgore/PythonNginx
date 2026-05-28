@@ -1,7 +1,8 @@
 # PythonNginx
 
 Учебный упрощенный аналог nginx на Python: асинхронный HTTP-сервер со статикой,
-keep-alive, virtual hosts, autoindex, open file cache, логированием и proxy_pass.
+keep-alive, virtual hosts, autoindex, open file cache, логированием, proxy_pass,
+простым распределением нагрузки между upstream и HTTPS.
 
 Главный документ по архитектуре и плану реализации: [docs/IMPLEMENTATION_GUIDE.md](docs/IMPLEMENTATION_GUIDE.md).
 
